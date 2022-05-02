@@ -110,8 +110,17 @@ std::string GetJSFilename(const GeneratorOptions& options,
 
 // Given a filename like foo/bar/baz.proto, returns the root directory
 // path ../../
-std::string GetRootPath(const std::string& from_filename,
+std::string GetRootPath(const GeneratorOptions& options,
+                        const std::string& from_filename,
                         const std::string& to_filename) {
+
+  if (options.import_style == GeneratorOptions::kImportEs6) {
+    auto it = options.m.find(to_filename);
+    if (it != options.m.end()) {
+      return it->second;
+    }
+  }
+
   if (to_filename.find("google/protobuf") == 0) {
     // Well-known types (.proto files in the google/protobuf directory) are
     // assumed to come from the 'google-protobuf' npm package.  We may want to
@@ -128,6 +137,11 @@ std::string GetRootPath(const std::string& from_filename,
   for (size_t i = 0; i < slashes; i++) {
     result += "../";
   }
+
+  if (options.import_style == GeneratorOptions::kImportEs6) {
+    result = "./" + result;
+  }
+
   return result;
 }
 
@@ -352,6 +366,12 @@ std::string ToLower(const std::string& input) {
   }
 
   return result;
+}
+
+// Given a filename like foo/bar/baz.proto, returns the corresponding name Baz.
+std::string GetES6ExportName(const GeneratorOptions& options,
+                             const std::string& filename) {
+  return ToUpperCamel(ParseLowerUnderscore(StripProto(filename).substr(filename.rfind('/')+1)));
 }
 
 // When we're generating one output file per SCC, this is the filename
@@ -3504,6 +3524,10 @@ bool GeneratorOptions::ParseFromOptions(
         return false;
       }
       annotate_code = true;
+    } else if (HasPrefixString(options[i].first, "M") && options[i].second != "") {
+      // Mgoogle/protobuf/timestamp.proto=https://path/to/google/protobuf/timestamp_pb.js is recognized here.
+      std::string first = StripPrefixString(options[i].first, "M");
+      m.insert(std::pair<std::string,std::string>(first, options[i].second));
     } else {
       // Assume any other option is an output directory, as long as it is a bare
       // `key` rather than a `key=value` option.
@@ -3647,7 +3671,22 @@ void Generator::GenerateFile(const GeneratorOptions& options,
           "var $alias$ = require('$file$');\n"
           "goog.object.extend(proto, $alias$);\n",
           "alias", ModuleAlias(name), "file",
-          GetRootPath(file->name(), name) + GetJSFilename(options, name));
+          GetRootPath(options, file->name(), name) + GetJSFilename(options, name));
+    }
+  } else if (options.import_style == GeneratorOptions::kImportEs6) {
+      printer->Print("import { default as jspb } from 'https://jspm.dev/google-protobuf';\n");
+      printer->Print("var goog = jspb;\n");
+      printer->Print(
+          "var global = (function() { return this || window || global || self "
+          "|| Function('return this')(); }).call(null);\n\n");
+    for (int i = 0; i < file->dependency_count(); i++) {
+      const std::string& name = file->dependency(i)->name();
+      printer->Print(
+          "import { $name$ as $alias$ } from '$file$';\n"
+          "goog.object.extend(proto, $alias$);\n",
+          "name", GetES6ExportName(options, name),
+          "alias", ModuleAlias(name), "file",
+          GetRootPath(options, file->name(), name) + GetJSFilename(options, name));
     }
   }
 
@@ -3691,6 +3730,10 @@ void Generator::GenerateFile(const GeneratorOptions& options,
   } else if (options.import_style == GeneratorOptions::kImportCommonJsStrict) {
     printer->Print("goog.object.extend(exports, proto);\n", "package",
                    GetNamespace(options, file));
+  } else if (options.import_style == GeneratorOptions::kImportEs6 && !provided.empty()) {
+    printer->Print("export const $name$ = $package$;\n",
+                   "name", GetES6ExportName(options, file->name()),
+                   "package", GetNamespace(options, file));
   }
 
   // Emit well-known type methods.

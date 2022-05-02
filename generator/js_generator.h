@@ -33,6 +33,7 @@
 #ifndef GOOGLE_PROTOBUF_COMPILER_JS_GENERATOR_H__
 #define GOOGLE_PROTOBUF_COMPILER_JS_GENERATOR_H__
 
+#include <map>
 #include <set>
 #include <string>
 
@@ -51,6 +52,8 @@ class EnumDescriptor;
 class FieldDescriptor;
 class OneofDescriptor;
 class FileDescriptor;
+
+typedef std::map<std::string, std::string> ImportMap;
 
 namespace io {
 class Printer;
@@ -85,7 +88,8 @@ struct GeneratorOptions {
         library(""),
         extension(".js"),
         one_output_file_per_input_file(false),
-        annotate_code(false) {}
+        annotate_code(false),
+        m({}) {}
 
   bool ParseFromOptions(
       const std::vector<std::pair<std::string, std::string> >& options,
@@ -128,6 +132,8 @@ struct GeneratorOptions {
   // are encoded as base64 proto of GeneratedCodeInfo message (see
   // descriptor.proto).
   bool annotate_code;
+  // importmappings, modeled after protoc-gen-go's M option.
+  ImportMap m{};
 };
 
 // CodeGenerator implementation which generates a JavaScript source file and
